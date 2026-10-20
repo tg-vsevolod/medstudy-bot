@@ -1,0 +1,28 @@
+{
+  "name": "medstudy-bot",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch --import tsx src/bot.ts",
+    "build": "tsc",
+    "start": "node dist/bot.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@grammyjs/auto-retry": "^2.0.2",
+    "better-sqlite3": "^13.0.3",
+    "dotenv": "^18.0.8",
+    "googleapis": "^186.0.0",
+    "grammy": "^1.46.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}
