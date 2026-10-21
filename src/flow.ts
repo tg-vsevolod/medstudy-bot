@@ -1,6 +1,7 @@
 import type { Bot, Context } from 'grammy';
 import { setAdminMenu } from './admin.js';
 import { adminIds, isAdmin } from './admins.js';
+import { addLeadComment, lateRegistrationComment } from './bitrix.js';
 import { channelId, isChannelMember } from './channel.js';
 import { masterClasses } from './config.js';
 import { cancelJob, getUser, updateUser, upsertUser, type Step, type User } from './db.js';
@@ -46,6 +47,11 @@ async function answerQuestion(
 
 async function completeRegistration(ctx: Context, user: User): Promise<void> {
   cancelJob(user.id, 'no_answer');
+  if (user.bitrix_lead_id) {
+    void addLeadComment(user.bitrix_lead_id, lateRegistrationComment(user)).catch((err) =>
+      console.error(`Не удалось дописать комментарий в лид ${user.bitrix_lead_id}:`, err),
+    );
+  }
   await sendRegistrationComplete(ctx.api, user);
   scheduleReminders(user);
 

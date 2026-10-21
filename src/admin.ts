@@ -1,7 +1,8 @@
 import { GrammyError, InlineKeyboard, InputFile, type Api, type Bot, type Context } from 'grammy';
 import { addAdmin, adminIds, isAdmin, isEnvAdmin, masterClassStartKey, removeAdmin } from './admins.js';
-import { channelId } from './channel.js';
-import { TIME_ZONE, env, masterClasses, pragueTime, setMasterClassStart, type Track } from './config.js';
+import { isBitrixEnabled } from './bitrix.js';
+import { channelId, channelUrl } from './channel.js';
+import { TIME_ZONE, masterClasses, pragueTime, setMasterClassStart, type Track } from './config.js';
 import {
   allUsers,
   deleteUser,
@@ -14,6 +15,7 @@ import {
   type Segment,
   type User,
 } from './db.js';
+import { MAX_DELAY_MIN, leadDelayMin, remindDelayMin, setLeadDelayMin, setRemindDelayMin } from './delays.js';
 import { platformUrl, streamLink } from './messages.js';
 import { scheduleReminders } from './scheduler.js';
 import { labels } from './texts.js';
@@ -26,6 +28,9 @@ export const adminCommands = [
   { command: 'broadcast', description: 'Рассылка' },
   { command: 'setlink', description: 'Ссылка на трансляцию: med|tech <url>' },
   { command: 'setplatform', description: 'Ссылка на платформу' },
+  { command: 'setchannel', description: 'Ссылка на группу: https://t.me/...' },
+  { command: 'setreminddelay', description: 'Напоминание «Нет ответа», минуты' },
+  { command: 'setleaddelay', description: 'Лид в Битрикс24 после молчания, минуты' },
   { command: 'setdate', description: 'Дата мастер-класса: med|tech ДД.ММ.ГГГГ ЧЧ:ММ' },
   { command: 'admins', description: 'Список админов' },
   { command: 'addadmin', description: 'Добавить админа: <id>' },
@@ -70,7 +75,11 @@ const helpText = `🛠 Команды администратора:
 /cancel — отменить рассылку
 /setlink med|tech <url> — ссылка на онлайн-трансляцию
 /setplatform <url> — ссылка на образовательную платформу
+/setchannel <url> — ссылка на группу, в которую нужно вступить перед платформой
 /setdate med|tech ДД.ММ.ГГГГ ЧЧ:ММ — дата и время мастер-класса (по Праге)
+
+/setreminddelay <минуты> — через сколько минут без ответа напомнить о вопросе
+/setleaddelay <минуты> — через сколько минут без ответа создать лид в Битрикс24
 
 /admins — список админов
 /addadmin <id> — добавить админа (или реплаем на пересланное сообщение пользователя)
@@ -91,9 +100,10 @@ function isUrl(value: string | undefined): value is string {
 }
 
 function channelStatus(): string {
-  if (!env.channelUrl) return 'не требуется (CHANNEL_URL не задан)';
-  if (!channelId()) return `❗️ бот не добавлен админом в группу, вступление не проверяется\n${env.channelUrl}`;
-  return `✅ подключена, вступление проверяется\n${env.channelUrl}`;
+  const url = channelUrl();
+  if (!url) return 'не требуется (ссылка не задана: /setchannel)';
+  if (!channelId()) return `❗️ бот не добавлен админом в группу, вступление не проверяется\n${url}`;
+  return `✅ подключена, вступление проверяется\n${url}`;
 }
 
 function statsText(): string {
@@ -131,7 +141,13 @@ function statsText(): string {
 Платформа: ${platformUrl() ?? '❗️ не задана'}
 Группа: ${channelStatus()}
 Трансляция (медицина, ${masterClasses.med.dateLabel}): ${link('med')}
-Трансляция (тех, ${masterClasses.tech.dateLabel}): ${link('tech')}`;
+Трансляция (тех, ${masterClasses.tech.dateLabel}): ${link('tech')}
+
+⏱ Задержки:
+Напоминание «Нет ответа»: ${remindDelayMin()} мин
+Лид в Битрикс24: ${leadDelayMin()} мин
+
+🗂 Битрикс24: ${isBitrixEnabled() ? `✅ подключён, лидов создано: ${s.leads}` : '❗️ не настроен (BITRIX_WEBHOOK_URL)'}`;
 }
 
 const csvDate = new Intl.DateTimeFormat('ru-RU', { dateStyle: 'short', timeStyle: 'short', timeZone: TIME_ZONE });
@@ -263,6 +279,54 @@ export function registerAdmin(bot: Bot): void {
     }
     setSetting('platform_url', url);
     await ctx.reply(`✅ Ссылка на платформу сохранена:\n${url}`);
+  });
+
+  const parseMinutes = (text: string): number | null => {
+    const minutes = Number(text.trim());
+    return Number.isInteger(minutes) && minutes >= 1 && minutes <= MAX_DELAY_MIN ? minutes : null;
+  };
+
+  const delayWarning = () =>
+    leadDelayMin() <= remindDelayMin()
+      ? `\n\n⚠️ Лид (${leadDelayMin()} мин) создаётся не позже напоминания «Нет ответа» (${remindDelayMin()} мин): часть людей вернётся после напоминания, а лид на них уже будет.`
+      : '';
+
+  admin.command('setreminddelay', async (ctx) => {
+    const minutes = parseMinutes(ctx.match);
+    if (!minutes) {
+      await ctx.reply(`Формат: /setreminddelay <минуты от 1 до ${MAX_DELAY_MIN}>\nСейчас: ${remindDelayMin()} мин`);
+      return;
+    }
+    setRemindDelayMin(minutes);
+    await ctx.reply(
+      `✅ Напоминание «Нет ответа» будет приходить через ${minutes} мин после вопроса (для новых вопросов).${delayWarning()}`,
+    );
+  });
+
+  admin.command('setleaddelay', async (ctx) => {
+    const minutes = parseMinutes(ctx.match);
+    if (!minutes) {
+      await ctx.reply(`Формат: /setleaddelay <минуты от 1 до ${MAX_DELAY_MIN}>\nСейчас: ${leadDelayMin()} мин`);
+      return;
+    }
+    setLeadDelayMin(minutes);
+    await ctx.reply(
+      `✅ Лид в Битрикс24 будет создаваться через ${minutes} мин без ответа после последнего вопроса.${delayWarning()}` +
+        (isBitrixEnabled() ? '' : '\n\n❗️ Битрикс24 не настроен: задай BITRIX_WEBHOOK_URL в .env.'),
+    );
+  });
+
+  admin.command('setchannel', async (ctx) => {
+    const url = ctx.match.trim();
+    if (!isUrl(url) || !url.startsWith('https://t.me/')) {
+      await ctx.reply('Формат: /setchannel https://t.me/...');
+      return;
+    }
+    setSetting('channel_url', url);
+    await ctx.reply(
+      `✅ Ссылка на группу сохранена:\n${url}\n\nЕсли это другая группа, добавь бота туда администратором, иначе он не сможет проверять вступление.`,
+      { link_preview_options: { is_disabled: true } },
+    );
   });
 
   admin.command('setdate', async (ctx) => {

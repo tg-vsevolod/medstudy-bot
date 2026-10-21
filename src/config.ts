@@ -18,6 +18,11 @@ export const env = {
   platformUrl: process.env.PLATFORM_URL ?? '',
   channelUrl: process.env.CHANNEL_URL ?? '',
   noAnswerDelayMin: Number(process.env.NO_ANSWER_DELAY_MIN ?? 30),
+  leadDelayMin: Number(process.env.LEAD_DELAY_MIN ?? 60),
+  bitrix: {
+    webhookUrl: process.env.BITRIX_WEBHOOK_URL ?? '',
+    sourceId: process.env.BITRIX_SOURCE_ID || 'OTHER',
+  },
   google: {
     sheetId: process.env.GOOGLE_SHEET_ID ?? '',
     sheetName: process.env.GOOGLE_SHEET_NAME ?? 'Регистрации',

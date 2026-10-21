@@ -30,6 +30,8 @@ export interface User {
   blocked: number;
   created_at: number;
   registered_at: number | null;
+  last_question_at: number | null;
+  bitrix_lead_id: number | null;
 }
 
 export interface Job {
@@ -78,6 +80,11 @@ db.exec(`
     value TEXT NOT NULL
   );
 `);
+
+const userColumns = new Set((db.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name));
+for (const column of ['last_question_at', 'bitrix_lead_id']) {
+  if (!userColumns.has(column)) db.exec(`ALTER TABLE users ADD COLUMN ${column} INTEGER`);
+}
 
 const getUserStmt = db.prepare('SELECT * FROM users WHERE id = ?');
 
@@ -180,6 +187,17 @@ export function segmentUserIds(segment: Segment): number[] {
   return rows.map((row) => row.id);
 }
 
+/** У пользователей, начавших опрос до появления last_question_at, он пустой, и лиды на них не создаются. */
+export function abandonedUsers(cutoff: number): User[] {
+  return db
+    .prepare(
+      `SELECT * FROM users
+       WHERE step != 'registered' AND bitrix_lead_id IS NULL AND last_question_at <= ?
+       ORDER BY last_question_at`,
+    )
+    .all(cutoff) as User[];
+}
+
 export function allUsers(): User[] {
   return db.prepare('SELECT * FROM users ORDER BY created_at').all() as User[];
 }
@@ -197,6 +215,7 @@ export interface Stats {
   relocating: number;
   offline: number;
   online: number;
+  leads: number;
 }
 
 export function getStats(): Stats {
@@ -214,7 +233,8 @@ export function getStats(): Stats {
          COALESCE(SUM(step = 'registered' AND location = 'prague'), 0) AS prague,
          COALESCE(SUM(step = 'registered' AND location = 'relocating'), 0) AS relocating,
          COALESCE(SUM(attendance = 'offline'), 0) AS offline,
-         COALESCE(SUM(attendance = 'online'), 0) AS online
+         COALESCE(SUM(attendance = 'online'), 0) AS online,
+         COUNT(bitrix_lead_id) AS leads
        FROM users`,
     )
     .get() as Stats;

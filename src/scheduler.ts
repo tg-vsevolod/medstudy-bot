@@ -1,6 +1,19 @@
 import { GrammyError, type Api } from 'grammy';
+import { isAdmin } from './admins.js';
+import { createLead, isBitrixEnabled } from './bitrix.js';
 import { masterClasses } from './config.js';
-import { dueJobs, getUser, markJobSent, scheduleJob, updateUser, type Job, type JobKind, type User } from './db.js';
+import {
+  abandonedUsers,
+  dueJobs,
+  getUser,
+  markJobSent,
+  scheduleJob,
+  updateUser,
+  type Job,
+  type JobKind,
+  type User,
+} from './db.js';
+import { leadDelayMin } from './delays.js';
 import {
   sendMasterClassEnded,
   sendNoAnswer,
@@ -59,6 +72,15 @@ async function runJob(api: Api, job: Job): Promise<void> {
   await senders[job.kind](api, user);
 }
 
+async function processAbandoned(): Promise<void> {
+  if (!isBitrixEnabled()) return;
+  for (const user of abandonedUsers(Date.now() - leadDelayMin() * MINUTE)) {
+    if (isAdmin(user.id)) continue;
+    const leadId = await createLead(user);
+    if (leadId) updateUser(user.id, { bitrix_lead_id: leadId });
+  }
+}
+
 let running = false;
 
 async function tick(api: Api): Promise<void> {
@@ -77,6 +99,7 @@ async function tick(api: Api): Promise<void> {
         }
       }
     }
+    await processAbandoned().catch((err) => console.error('Ошибка при создании лидов:', err));
   } finally {
     running = false;
   }

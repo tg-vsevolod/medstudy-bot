@@ -1,6 +1,11 @@
 import type { Api, Bot } from 'grammy';
 import { adminIds, isAdmin } from './admins.js';
+import { env } from './config.js';
 import { getSetting, setSetting } from './db.js';
+
+export function channelUrl(): string | null {
+  return getSetting('channel_url') || env.channelUrl || null;
+}
 
 export function channelId(): number | null {
   const value = Number(getSetting('channel_id'));

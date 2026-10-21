@@ -1,7 +1,8 @@
 import { InlineKeyboard, type Api } from 'grammy';
-import { channelId, isChannelMember } from './channel.js';
+import { channelId, channelUrl, isChannelMember } from './channel.js';
 import { env, masterClasses, type MasterClass, type Track } from './config.js';
-import { getSetting, scheduleJob, type Step, type User } from './db.js';
+import { getSetting, scheduleJob, updateUser, type Step, type User } from './db.js';
+import { remindDelayMin } from './delays.js';
 import * as t from './texts.js';
 
 export type QuestionStep = Exclude<Step, 'registered'>;
@@ -37,7 +38,8 @@ const questions: Record<QuestionStep, { text: string; keyboard: () => InlineKeyb
 export async function sendQuestion(api: Api, userId: number, step: QuestionStep): Promise<void> {
   const question = questions[step];
   await api.sendMessage(userId, question.text, { reply_markup: question.keyboard() });
-  scheduleJob(userId, 'no_answer', Date.now() + env.noAnswerDelayMin * 60_000);
+  updateUser(userId, { last_question_at: Date.now() });
+  scheduleJob(userId, 'no_answer', Date.now() + remindDelayMin() * 60_000);
 }
 
 export async function sendNoAnswer(api: Api, userId: number, step: QuestionStep): Promise<void> {
@@ -72,15 +74,16 @@ async function platformKeyboard(
   kind: PlatformKind,
 ): Promise<{ keyboard?: InlineKeyboard; hint?: string }> {
   const keyboard = platformButton(kind);
-  if (!keyboard || !env.channelUrl) return { keyboard };
+  const joinUrl = channelUrl();
+  if (!keyboard || !joinUrl) return { keyboard };
   if (!channelId()) {
-    console.warn('Бот не подключён к группе: добавь его админом в группу из CHANNEL_URL');
-    return { keyboard: keyboard.row().url(t.buttons.joinChannel, env.channelUrl), hint: t.joinChannelSoftHint };
+    console.warn('Бот не подключён к группе: добавь его админом в группу из /setchannel или CHANNEL_URL');
+    return { keyboard: keyboard.row().url(t.buttons.joinChannel, joinUrl), hint: t.joinChannelSoftHint };
   }
   if (await isChannelMember(api, userId)) return { keyboard };
   return {
     keyboard: new InlineKeyboard()
-      .url(t.buttons.joinChannel, env.channelUrl)
+      .url(t.buttons.joinChannel, joinUrl)
       .row()
       .text(t.buttons.joinedChannel, `join:${kind}`),
     hint: t.joinChannelHint,
